@@ -1,5 +1,3 @@
 python-telegram-bot==20.3
-spotipy==2.22.1
 yt-dlp
-ffmpeg-python
-youtube-search-python
+python-dotenv
