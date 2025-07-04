@@ -3,6 +3,21 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
+import asyncio
+
+# فقط برای فریب Render :)
+import http.server
+import socketserver
+import threading
+
+def fake_server():
+    PORT = int(os.getenv("PORT", 10000))
+    Handler = http.server.SimpleHTTPRequestHandler
+    with socketserver.TCPServer(("", PORT), Handler) as httpd:
+        print(f"Serving dummy HTTP on port {PORT}")
+        httpd.serve_forever()
+
+threading.Thread(target=fake_server).start()
 
 SPOTIFY_CLIENT_ID = os.getenv('SPOTIFY_CLIENT_ID')
 SPOTIFY_CLIENT_SECRET = os.getenv('SPOTIFY_CLIENT_SECRET')
@@ -16,10 +31,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text
-    await update.message.reply_text(f"دریافت لینک: {url}\n(دانلود هنوز آماده نیست)")
+    await update.message.reply_text(f"دریافت لینک: {url}\n(دانلود هنوز فعال نشده)")
 
-if __name__ == '__main__':
+async def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("download", download))
-    app.run_polling()
+    await app.run_polling()
+
+asyncio.run(main())
