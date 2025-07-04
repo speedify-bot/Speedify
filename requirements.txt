@@ -1,4 +1,10 @@
 python-telegram-bot==20.3
+spotipy==2.22.1
+httpx~=0.24.0
+redis>=3.5.3
+requests>=2.25.0
+six>=1.15.0
+urllib3>=1.26.0
+youtube-search-python
 yt-dlp
-youtubesearchpython
-nest_asyncio
+ffmpeg-python
