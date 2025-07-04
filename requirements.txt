@@ -1,3 +1,5 @@
 python-telegram-bot==20.3
 yt-dlp
 python-dotenv
+nest_asyncio
+httpx~=0.24.0
