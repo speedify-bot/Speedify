@@ -1,67 +1,79 @@
-import os import asyncio from telegram import Update from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters import spotipy from spotipy.oauth2 import SpotifyClientCredentials import nest_asyncio
+import os
+import asyncio
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+import spotipy
+from spotipy.oauth2 import SpotifyClientCredentials
+import nest_asyncio
+import http.server
+import socketserver
+import threading
 
-==================== راه‌اندازی سرور فیک برای Render ====================
+# اجرای یک سرور ساده برای Render (الزام پورت‌بایندینگ)
+def fake_server():
+    PORT = int(os.getenv("PORT", 10000))
+    Handler = http.server.SimpleHTTPRequestHandler
+    with socketserver.TCPServer(("", PORT), Handler) as httpd:
+        print(f"Fake server running on port {PORT}")
+        httpd.serve_forever()
 
-Render نیاز به پورت باز دارد، پس یک سرور ساده روی یک پورت ران می‌کنیم تا خطا ندهد
+threading.Thread(target=fake_server, daemon=True).start()
 
-import http.server import socketserver import threading
+# دریافت متغیرهای محیطی
+SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
+SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
-def fake_server(): PORT = int(os.getenv("PORT", 10000)) Handler = http.server.SimpleHTTPRequestHandler with socketserver.TCPServer(("", PORT), Handler) as httpd: print(f"Fake server running on port {PORT}") httpd.serve_forever()
+# راه‌اندازی کلاینت اسپاتیفای
+sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(
+    client_id=SPOTIFY_CLIENT_ID,
+    client_secret=SPOTIFY_CLIENT_SECRET
+))
 
-اجرای سرور فیک در ترد جداگانه
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "🎧 سلام!\n"
+        "ربات HeadzBeats آماده‌ست تا اطلاعات آهنگ‌های اسپاتیفای رو بهت بده.\n"
+        "کافیه لینک مستقیم یه آهنگ اسپاتیفای برام بفرستی."
+    )
 
-threading.Thread(target=fake_server).start()
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
 
-==================== گرفتن اطلاعات مهم از متغیرهای محیطی ====================
+    if "open.spotify.com/track" in text:
+        try:
+            track_id = text.split("track/")[1].split("?")[0]
+            track = sp.track(track_id)
 
-SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID") SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET") TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+            name = track.get("name", "نامشخص")
+            artists = ", ".join([artist.get("name", "?") for artist in track.get("artists", [])])
+            album = track.get("album", {}).get("name", "نامشخص")
+            duration_ms = track.get("duration_ms", 0)
+            duration_min = duration_ms // 60000
+            duration_sec = (duration_ms % 60000) // 1000
+            preview_url = track.get("preview_url") or "⛔️ پیش‌نمایش موجود نیست."
 
-==================== اتصال به Spotify API ====================
+            message = (
+                f"🎶 **آهنگ:** {name}\n"
+                f"🎤 **خواننده:** {artists}\n"
+                f"💿 **آلبوم:** {album}\n"
+                f"⏱️ **مدت زمان:** {duration_min} دقیقه و {duration_sec} ثانیه\n"
+                f"🔗 **پیش‌نمایش:** {preview_url}"
+            )
 
-sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials( client_id=SPOTIFY_CLIENT_ID, client_secret=SPOTIFY_CLIENT_SECRET ))
+            await update.message.reply_markdown(message)
+        except Exception as e:
+            await update.message.reply_text(f"⚠️ خطا در دریافت اطلاعات آهنگ:\n{e}")
+    else:
+        await update.message.reply_text("❗ لطفاً فقط لینک مستقیم آهنگ اسپاتیفای ارسال کن.")
 
-==================== دستور /start ====================
+async def main():
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE): await update.message.reply_text( "🎧 سلام! به ربات HeadzBeats خوش اومدی!\n" "لطفاً لینک یک آهنگ از اسپاتیفای برام بفرست، تا مشخصاتشو برات دربیارم." )
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-==================== پاسخ‌دهی به پیام‌های کاربر ====================
+    await app.run_polling()
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE): text = update.message.text
-
-if "open.spotify.com/track" in text:
-    try:
-        track_id = text.split("track/")[1].split("?")[0]
-        track = sp.track(track_id)
-        name = track.get("name", "نامشخص")
-        artists = ", ".join([artist.get("name", "؟") for artist in track.get("artists", [])])
-        album = track.get("album", {}).get("name", "نامشخص")
-        preview = track.get("preview_url") or "⛔️ این آهنگ پیش‌نمایش (Preview) نداره."
-
-        response = (
-            f"🎶 آهنگ: {name}\n"
-            f"🎤 خواننده: {artists}\n"
-            f"💿 آلبوم: {album}\n"
-            f"🔗 پیش‌نمایش: {preview}"
-        )
-        await update.message.reply_text(response)
-    except Exception as e:
-        await update.message.reply_text(f"⚠️ خطا در دریافت اطلاعات آهنگ:\n{str(e)}")
-else:
-    await update.message.reply_text("❗️ لطفاً فقط لینک مستقیم یک آهنگ از اسپاتیفای بفرست.")
-
-==================== اجرای ربات ====================
-
-async def main(): app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-
-# ثبت دستور /start
-app.add_handler(CommandHandler("start", start))
-
-# ثبت پیام‌های متنی (غیر از کامند)
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-await app.run_polling()
-
-==================== اجرای ایمن Asyncio روی Render ====================
-
-nest_asyncio.apply() asyncio.get_event_loop().run_until_complete(main())
-
+nest_asyncio.apply()
+asyncio.get_event_loop().run_until_complete(main())
