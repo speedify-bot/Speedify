@@ -1,5 +1,6 @@
 python-telegram-bot==20.3
-yt-dlp
-python-dotenv
-nest_asyncio
-httpx~=0.24.0
+yt-dlp==2025.6.30
+spotipy==2.22.1
+requests==2.32.4
+python-dotenv==1.1.1
+httpx==0.24.1
