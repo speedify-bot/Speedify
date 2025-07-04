@@ -1,76 +1,91 @@
 import os
-import asyncio
-from telegram import Update, InputFile
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
-from youtubesearchpython import VideosSearch
+import logging
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
+from spotipy import Spotify
+from spotipy.oauth2 import SpotifyClientCredentials
 import yt_dlp
-import ffmpeg
 
-BOT_TOKEN = 'توکن_ربات_تو_اینجا_قرار_بده'
+# لاگ‌ها برای بررسی ارورها
+logging.basicConfig(level=logging.INFO)
 
-# مسیر پوشه دانلود موقت
-DOWNLOAD_PATH = './downloads'
-os.makedirs(DOWNLOAD_PATH, exist_ok=True)
+# دریافت متغیرها از محیط (که در Render تعریف کردی)
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
+SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("سلام! لینک یا نام آهنگ رو بفرست تا برات دانلود کنم.")
+# اتصال به اسپاتیفای
+sp = Spotify(auth_manager=SpotifyClientCredentials(client_id=SPOTIFY_CLIENT_ID, client_secret=SPOTIFY_CLIENT_SECRET))
 
-def search_youtube(song_name):
-    videosSearch = VideosSearch(song_name, limit=1)
-    result = videosSearch.result()
-    video_url = result['result'][0]['link']
-    title = result['result'][0]['title']
-    return video_url, title
-
-def download_audio(url, file_path):
+# دانلود آهنگ با کیفیت انتخاب‌شده
+def download_audio(query, quality):
     ydl_opts = {
         'format': 'bestaudio/best',
-        'outtmpl': file_path,
+        'outtmpl': 'song.%(ext)s',
+        'noplaylist': True,
         'quiet': True,
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
+            'preferredcodec': 'flac' if quality == 'FLAC' else 'mp3',
+            'preferredquality': '320' if quality == '320kbps' else '192',
         }],
     }
+
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.download([url])
+        info = ydl.extract_info(query, download=True)
+        filename = ydl.prepare_filename(info)
+        return filename.replace('.webm', f'.{"flac" if quality == "FLAC" else "mp3"}')
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_input = update.message.text.strip()
-    msg = await update.message.reply_text("در حال جستجو و دانلود آهنگ... لطفا صبر کن.")
-    
+# ارسال کیفیت‌ها
+async def ask_quality(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.message.text.strip()
+    context.user_data["query"] = query
+
+    keyboard = [
+        [InlineKeyboardButton("🎧 MP3 320kbps", callback_data="320kbps")],
+        [InlineKeyboardButton("🎶 MP3 192kbps", callback_data="192kbps")],
+        [InlineKeyboardButton("🎵 FLAC (High)", callback_data="FLAC")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("🎼 لطفاً کیفیت آهنگ رو انتخاب کن:", reply_markup=reply_markup)
+
+# واکنش به انتخاب کیفیت
+async def send_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    quality = query.data
+    search_query = context.user_data.get("query")
+
+    await query.edit_message_text("🎧 در حال دریافت آهنگ...")
+
+    # اگر لینک اسپاتیفای بود، تبدیل به نام بشه
+    if "open.spotify.com" in search_query:
+        try:
+            track_id = search_query.split("/")[-1].split("?")[0]
+            track = sp.track(track_id)
+            search_query = f"{track['name']} {track['artists'][0]['name']}"
+        except Exception as e:
+            await query.message.reply_text("❌ خطا در پردازش لینک اسپاتیفای.")
+            return
+
     try:
-        video_url, title = search_youtube(user_input)
-    except Exception:
-        await msg.edit_text("متاسفم، نتونستم آهنگ رو پیدا کنم.")
-        return
+        audio_file = download_audio(f"ytsearch:{search_query}", quality)
+        await query.message.reply_audio(audio=open(audio_file, "rb"), title=search_query)
+        os.remove(audio_file)
+    except Exception as e:
+        logging.error(e)
+        await query.message.reply_text("❌ خطا در دانلود آهنگ. دوباره تلاش کن.")
 
-    file_name = title.replace(' ', '_') + '.mp3'
-    file_path = os.path.join(DOWNLOAD_PATH, file_name)
+# استارت
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🎵 خوش اومدی به ربات دانلود آهنگ!\n\nفقط اسم آهنگ یا لینک اسپاتیفای رو برام بفرست.")
 
-    try:
-        download_audio(video_url, file_path)
-    except Exception:
-        await msg.edit_text("مشکلی در دانلود آهنگ پیش آمد.")
-        return
+# اجرای ربات
+if __name__ == "__main__":
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-    try:
-        with open(file_path, 'rb') as audio_file:
-            await update.message.reply_audio(audio_file, title=title)
-        await msg.delete()
-    except Exception:
-        await msg.edit_text("مشکلی در ارسال آهنگ پیش آمد.")
-    finally:
-        if os.path.exists(file_path):
-            os.remove(file_path)
-
-async def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, ask_quality))
+    app.add_handler(CallbackQueryHandler(send_audio))
 
-    await app.run_polling()
-
-if __name__ == '__main__':
-    asyncio.run(main())
+    app.run_polling()
