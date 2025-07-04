@@ -1,79 +1,70 @@
 import os
-import asyncio
+import logging
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
-import spotipy
-from spotipy.oauth2 import SpotifyClientCredentials
-import nest_asyncio
-import http.server
-import socketserver
-import threading
+from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
+from youtubesearchpython import VideosSearch
+import yt_dlp
+import asyncio
 
-# اجرای یک سرور ساده برای Render (الزام پورت‌بایندینگ)
-def fake_server():
-    PORT = int(os.getenv("PORT", 10000))
-    Handler = http.server.SimpleHTTPRequestHandler
-    with socketserver.TCPServer(("", PORT), Handler) as httpd:
-        print(f"Fake server running on port {PORT}")
-        httpd.serve_forever()
+# فعال‌سازی لاگ برای خطایابی
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 
-threading.Thread(target=fake_server, daemon=True).start()
+TOKEN = 'توکن_ربات_خودت_اینجا'
 
-# دریافت متغیرهای محیطی
-SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
-SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-
-# راه‌اندازی کلاینت اسپاتیفای
-sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(
-    client_id=SPOTIFY_CLIENT_ID,
-    client_secret=SPOTIFY_CLIENT_SECRET
-))
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🎧 سلام!\n"
-        "ربات HeadzBeats آماده‌ست تا اطلاعات آهنگ‌های اسپاتیفای رو بهت بده.\n"
-        "کافیه لینک مستقیم یه آهنگ اسپاتیفای برام بفرستی."
-    )
-
+# هندلر اصلی پیام‌ها
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
+    user = update.effective_user.first_name
+    query = update.message.text
 
-    if "open.spotify.com/track" in text:
-        try:
-            track_id = text.split("track/")[1].split("?")[0]
-            track = sp.track(track_id)
+    await update.message.reply_text(f"🎧 {user} عزیز، دارم دنبال آهنگت می‌گردم... ⏳")
 
-            name = track.get("name", "نامشخص")
-            artists = ", ".join([artist.get("name", "?") for artist in track.get("artists", [])])
-            album = track.get("album", {}).get("name", "نامشخص")
-            duration_ms = track.get("duration_ms", 0)
-            duration_min = duration_ms // 60000
-            duration_sec = (duration_ms % 60000) // 1000
-            preview_url = track.get("preview_url") or "⛔️ پیش‌نمایش موجود نیست."
+    try:
+        # جستجو در یوتیوب
+        search = VideosSearch(query, limit=1)
+        result = search.result()['result'][0]
+        title = result['title']
+        link = result['link']
 
-            message = (
-                f"🎶 **آهنگ:** {name}\n"
-                f"🎤 **خواننده:** {artists}\n"
-                f"💿 **آلبوم:** {album}\n"
-                f"⏱️ **مدت زمان:** {duration_min} دقیقه و {duration_sec} ثانیه\n"
-                f"🔗 **پیش‌نمایش:** {preview_url}"
-            )
+        await update.message.reply_text(f"🎶 پیدا کردم: *{title}*\n🔗 {link}", parse_mode='Markdown')
 
-            await update.message.reply_markdown(message)
-        except Exception as e:
-            await update.message.reply_text(f"⚠️ خطا در دریافت اطلاعات آهنگ:\n{e}")
-    else:
-        await update.message.reply_text("❗ لطفاً فقط لینک مستقیم آهنگ اسپاتیفای ارسال کن.")
+        # تنظیمات yt_dlp برای دانلود MP3
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': 'song.mp3',
+            'quiet': True,
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+        }
 
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([link])
+
+        # ارسال فایل
+        await update.message.reply_audio(audio=open('song.mp3', 'rb'), caption=f"🎵 {title} آماده‌ست!")
+
+        # حذف فایل موقت
+        os.remove('song.mp3')
+
+    except Exception as e:
+        logging.error(f"Error: {e}")
+        await update.message.reply_text("❌ متأسفم، نتونستم آهنگ رو بفرستم. دوباره امتحان کن یا یه اسم دیگه بده.")
+
+# اجرای ربات
 async def main():
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    import nest_asyncio
+    nest_asyncio.apply()
 
-    app.add_handler(CommandHandler("start", start))
+    app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
+    print("ربات اجرا شد ✅")
     await app.run_polling()
 
-nest_asyncio.apply()
-asyncio.get_event_loop().run_until_complete(main())
+if __name__ == '__main__':
+    asyncio.run(main())
