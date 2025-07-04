@@ -6,39 +6,42 @@ from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, Callb
 from youtubesearchpython import VideosSearch
 import yt_dlp
 
-# فعال‌سازی لاگ
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 
-# توکن واقعی شما از BotFather
 TOKEN = "8091607004:AAERzAiFaJufb4kCH-8qNq99SALJ6_fsx6Q"
 
-# جستجوی آهنگ در یوتیوب
 async def search_youtube(query):
     search = VideosSearch(query, limit=1)
     result = search.result()['result'][0]
     return result['title'], result['link'], result['thumbnails'][0]['url'], result['duration']
 
-# دانلود آهنگ با کیفیت دلخواه
 def download_audio(url, filename="song", quality="mp3"):
     ydl_opts = {
         'format': 'bestaudio/best',
         'outtmpl': f'{filename}.{quality}',
         'quiet': True,
-        'postprocessors': [{
+    }
+
+    if quality == 'mp3':
+        ydl_opts['postprocessors'] = [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
             'preferredquality': '192',
-        }] if quality == 'mp3' else [],
-        'postprocessors_args': ['-acodec', 'flac'] if quality == 'flac' else []
-    }
+        }]
+    elif quality == 'flac':
+        ydl_opts['postprocessors'] = [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'flac',
+        }]
+
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
+
     return f"{filename}.{quality}"
 
-# پاسخ به پیام کاربر
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.message.text
     title, link, thumbnail, duration = await search_youtube(query)
@@ -54,7 +57,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='Markdown'
     )
 
-# پاسخ به انتخاب فرمت
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -73,7 +75,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_document(document=audio, filename=f"{track['title']}.flac", caption="🎧 Powered by SpeedHeadz")
     os.remove(filename)
 
-# راه‌اندازی ربات
 async def main():
     import nest_asyncio
     nest_asyncio.apply()
