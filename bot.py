@@ -1,58 +1,85 @@
 import logging
 import os
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from yt_dlp import YoutubeDL
+import asyncio
 
-TOKEN = os.environ.get("BOT_TOKEN")  # توکن ربات رو از محیط بخونه
+# ✅ توکن رباتت اینجاست:
+TOKEN = "8091607004:AAERzAiFaJufb4kCH-8qNq99SALJ6_fsx6Q"
 
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+# فعال‌سازی لاگ‌ها
+logging.basicConfig(level=logging.INFO)
 
-# پیغام خوش‌آمد
+# دکمه‌های انتخاب کیفیت
+quality_buttons = [
+    [InlineKeyboardButton("🎧 MP3 128", callback_data="128")],
+    [InlineKeyboardButton("🎧 MP3 320", callback_data="320")],
+    [InlineKeyboardButton("🎼 FLAC", callback_data="flac")]
+]
+
+# ذخیره پیام‌ کاربران
+user_messages = {}
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🎵 خوش اومدی! اسم آهنگ یا لینک اسپاتیفای رو بفرست تا برات دانلود کنم.")
+    await update.message.reply_text("سلام! لینک آهنگ یا اسمش رو بفرست 🎵")
 
-# دریافت پیام و دانلود آهنگ
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.message.text
-    msg = await update.message.reply_text("🔎 در حال جستجو و دانلود آهنگ...")
+    user_id = update.message.from_user.id
+    user_messages[user_id] = update.message.text
+    await update.message.reply_text("🔊 کیفیت مورد نظر رو انتخاب کن:", reply_markup=InlineKeyboardMarkup(quality_buttons))
 
-    ydl_opts = {
-        'format': 'bestaudio/best',
-        'outtmpl': 'song.%(ext)s',
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '320',
-        }],
-        'quiet': True,
-        'noplaylist': True,
-        'default_search': 'ytsearch',
-    }
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+
+    if user_id not in user_messages:
+        await query.edit_message_text("لینک یا اسم آهنگ رو اول بفرست.")
+        return
+
+    text = user_messages[user_id]
+    quality = query.data
+
+    msg = await query.edit_message_text("🎶 در حال پردازش آهنگ...")
 
     try:
-        with YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(query, download=True)
-            file_name = ydl.prepare_filename(info).replace(".webm", ".mp3").replace(".m4a", ".mp3")
+        opts = {
+            "format": "bestaudio",
+            "outtmpl": f"{user_id}.%(ext)s",
+            "quiet": True,
+            "postprocessors": [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3" if quality != "flac" else "flac",
+                "preferredquality": quality if quality != "flac" else "0"
+            }]
+        }
 
-        await context.bot.send_audio(chat_id=update.effective_chat.id, audio=open(file_name, 'rb'), title=info.get('title'), performer=info.get('uploader'))
-        os.remove(file_name)
-        await msg.delete()
+        with YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(text, download=True)
+            filename = ydl.prepare_filename(info)
+            audio_path = f"{user_id}.{'mp3' if quality != 'flac' else 'flac'}"
+
+        await context.bot.send_audio(chat_id=query.message.chat_id, audio=open(audio_path, "rb"),
+                                     title=info.get("title", "🎵 آهنگ"), performer=info.get("uploader", ""),
+                                     duration=int(info.get("duration", 0)))
+
+        os.remove(audio_path)
 
     except Exception as e:
-        await msg.edit_text("❌ خطا در دانلود آهنگ. لطفاً یک اسم یا لینک معتبر بفرست.")
+        await msg.edit_text(f"❌ خطا در دریافت آهنگ:\n{str(e)}")
 
-# شروع ربات
-if __name__ == '__main__':
-    from dotenv import load_dotenv
-    load_dotenv()
-
+async def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(CallbackQueryHandler(button_handler))
 
-    app.run_polling()
+    print("🤖 Bot is running...")
+    await app.run_polling()
+
+if __name__ == "__main__":
+    import nest_asyncio
+    nest_asyncio.apply()
+    asyncio.run(main())
